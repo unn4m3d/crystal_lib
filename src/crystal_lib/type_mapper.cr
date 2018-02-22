@@ -8,6 +8,8 @@ class CrystalLib::TypeMapper
 
   @typedef_name : String?
 
+  @typedefs = [] of String
+
   def initialize(@prefix_matcher : PrefixMatcher? = nil)
     @pending_definitions = [] of Crystal::ASTNode
     @pending_structs = [] of PendingStruct
@@ -54,9 +56,10 @@ class CrystalLib::TypeMapper
          PrimitiveType::Kind::Float,
          PrimitiveType::Kind::Double,
          PrimitiveType::Kind::LongDouble,
-         PrimitiveType::Kind::WChar,
-         PrimitiveType::Kind::VaList
+         PrimitiveType::Kind::WChar
       path ["LibC", type.kind.to_s]
+    when PrimitiveType::Kind::VaList
+      pointer_type(path "Void")
     else
       raise "Unsupported primitive kind: #{type.kind}"
     end
@@ -138,19 +141,24 @@ class CrystalLib::TypeMapper
   def map_internal(type : CrystalLib::StructOrUnion)
     untouched_struct_name = check_anonymous_name(type.unscoped_name)
     struct_name = crystal_type_name(untouched_struct_name)
-
+    struct_def = Crystal::CStructOrUnionDef.new(struct_name, union: type.kind == :union)
     if type.fields.empty?
       # For an empty struct we just return an alias to Void
-      struct_def = Crystal::Alias.new(struct_name, path(["Void"]))
+      # struct_def = Crystal::Alias.new(struct_name, path(["Void"]))
+      struct_def = nil
     else
-      struct_def = Crystal::CStructOrUnionDef.new(struct_name, union: type.kind == :union)
+
 
       # Leave struct body for later, because of possible recursiveness
       @pending_structs << PendingStruct.new(struct_def, type, untouched_struct_name)
     end
 
-    @pending_definitions << struct_def unless @generated.has_key?(type.object_id)
-
+    unless @typedefs.includes? struct_name
+      unless struct_def.nil?
+        @typedefs << struct_name
+        @pending_definitions << struct_def.not_nil! unless @generated.has_key?(type.object_id)
+      end
+    end
     path(struct_name)
   end
 
@@ -205,13 +213,19 @@ class CrystalLib::TypeMapper
 
   def declare_alias(name, type)
     crystal_name = crystal_type_name(name)
-    @pending_definitions << Crystal::Alias.new(crystal_name, type)
+    unless @typedefs.includes? crystal_name
+      @pending_definitions << Crystal::Alias.new(crystal_name, type)
+      @typedefs << crystal_name
+    end
     path(crystal_name)
   end
 
   def declare_typedef(name, type)
     crystal_name = crystal_type_name(name)
-    @pending_definitions << Crystal::TypeDef.new(crystal_name, type)
+    unless @typedefs.includes? crystal_name
+      @pending_definitions << Crystal::TypeDef.new(crystal_name, type)
+      @typedefs << crystal_name
+    end
     path(crystal_name)
   end
 
@@ -264,7 +278,7 @@ class CrystalLib::TypeMapper
   def crystal_field_name(name)
     name = match_prefix(name).underscore
     name = "_end" if name == "end"
-    name
+    name.gsub(/(\d)_([a-z])/, "\\1\\2")
   end
 
   def match_prefix(name)

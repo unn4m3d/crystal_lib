@@ -1,4 +1,7 @@
 class CrystalLib::PrefixImporter
+
+  @names = [] of String
+
   def self.import(nodes, prefix_matcher)
     importer = new prefix_matcher
     nodes.each do |node|
@@ -15,6 +18,7 @@ class CrystalLib::PrefixImporter
   def process(node : Define)
     name = match_prefix(node)
     return unless name
+    return if @names.includes? name
 
     begin
       value = Crystal::Parser.parse(node.value)
@@ -23,6 +27,8 @@ class CrystalLib::PrefixImporter
       # Ignore for now
       return
     end
+
+    @names << name
 
     name = Crystal::Path.new(name.upcase)
     @nodes << Crystal::Assign.new(name, value)
